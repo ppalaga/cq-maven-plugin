@@ -182,15 +182,42 @@ public class FlattenBomTask {
 
         @Override
         public boolean visitLeave(DependencyNode node) {
+            final Artifact a = node.getArtifact();
+            System.out.println("<<<< leave: " + a.getGroupId() + ":" + a.getArtifactId() + ":" + a.getVersion());
+
+            if (a.getGroupId().equals("org.ehcache")) {
+                System.out.println("============= ehcache exit");
+                System.out.println("============= ehcache children: " +
+                        node.getChildren()
+                                .stream()
+                                .map(DependencyNode::getArtifact)
+                                .map(at -> at.getGroupId() + ":" + at.getArtifactId() + ":" + at.getVersion())
+                                .collect(Collectors.joining(",")));
+            }
             return true;
         }
 
         @Override
         public boolean visitEnter(DependencyNode node) {
             final Artifact a = node.getArtifact();
-            if (!excludes.contains(a.getGroupId(), a.getArtifactId())) {
+            System.out.println(">>>> enter: " + a.getGroupId() + ":" + a.getArtifactId() + ":" + a.getVersion());
+            if (a.getGroupId().equals("org.ehcache")) {
+                System.out.println("============= ehcache");
+                System.out.println("============= ehcache children: " +
+                        node.getChildren()
+                                .stream()
+                                .map(DependencyNode::getArtifact)
+                                .map(at -> at.getGroupId() + ":" + at.getArtifactId() + ":" + at.getVersion())
+                                .collect(Collectors.joining(",")));
+            }
+            if (!excludes.contains(a.getGroupId(), a.getArtifactId(), a.getVersion())) {
+                System.out
+                        .println("=== transitive included: " + a.getGroupId() + ":" + a.getArtifactId() + ":" + a.getVersion());
                 final Ga gav = new Ga(a.getGroupId(), a.getArtifactId());
                 allTransitives.add(gav);
+            } else {
+                System.out.println(
+                        "==!!! transitive excluded: " + a.getGroupId() + ":" + a.getArtifactId() + ":" + a.getVersion());
             }
             return true;
         }
