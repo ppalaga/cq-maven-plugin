@@ -540,7 +540,10 @@ public class FlattenBomTask {
                 ? Collections.emptyList()
                 : resolutionSuspects.stream().map(GavPattern::of).collect(Collectors.toList());
 
-        final GavSet collectorExcludes = GavSet.builder().include(parent.getGroupId() + ":" + parent.getArtifactId())
+        final GavSet collectorExcludes = GavSet.builder()
+                .includes(
+                        parent.getGroupId() + ":" + parent.getArtifactId(),
+                        "org.glassfish.jaxb:jaxb-runtime:jar:2.*")
                 .build();
         final Set<Ga> allTransitives = new TreeSet<>();
         final Map<Ga, BomEntryData> transitivesByBomEntry = new LinkedHashMap<>();
