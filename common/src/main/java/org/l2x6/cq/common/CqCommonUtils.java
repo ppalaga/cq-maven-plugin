@@ -43,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.StringTokenizer;
 import java.util.TreeSet;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -51,6 +52,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.camel.catalog.Kind;
+import org.apache.camel.tooling.model.ArtifactModel;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.lifecycle.internal.MojoDescriptorCreator;
 import org.apache.maven.model.Model;
@@ -103,6 +105,9 @@ public class CqCommonUtils {
     private static final int CREATE_RETRY_COUNT = 256;
     private static final long DELETE_RETRY_MILLIS = 5000L;
     private static final boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+    /** Module name delimiters used throughout Quarkus ecosystem */
+    private static final List<String> MAVEN_MODULE_NAME_DELIMITERS = List.of(
+            Pattern.quote(" :: "), Pattern.quote(" : "), Pattern.quote(" - "));
 
     private static final Pattern SIMPLE_XML_ELEMENT_PATTERN = Pattern.compile("\\s+/>");
 
@@ -485,8 +490,8 @@ public class CqCommonUtils {
     }
 
     /**
-     * @param  gas the universe to filter from
-     * @return     a {@link Stream} of runtime extension {@link Ga}s
+     * @param gas the universe to filter from
+     * @return a {@link Stream} of runtime extension {@link Ga}s
      */
     public static Stream<Ga> filterExtensions(Stream<Ga> gas) {
         return gas
@@ -554,7 +559,7 @@ public class CqCommonUtils {
                         return (String) new PluginParameterExpressionEvaluator(
                                 session,
                                 new MojoExecution(mojoDescriptor))
-                                .evaluate(expr, String.class);
+                                        .evaluate(expr, String.class);
                     } catch (ExpressionEvaluationException | PluginNotFoundException | PluginResolutionException
                             | PluginDescriptorParsingException | MojoNotFoundException | NoPluginFoundForPrefixException
                             | InvalidPluginDescriptorException | PluginVersionResolutionException e) {
@@ -613,5 +618,30 @@ public class CqCommonUtils {
                         .toArray(String[]::new));
         return profiles;
     }
+
+    public static String getNameBase(final String name) {
+        String[] nameParts = MAVEN_MODULE_NAME_DELIMITERS.stream()
+                .map(delim -> name.split(delim))
+                .filter(parts -> parts.length == 3)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("Could not split Maven module name " + name + " using any of delimiters " + MAVEN_MODULE_NAME_DELIMITERS + " expecting 3 parts"));
+        return nameParts[1];
+    }
+
+    public static String getVersion(Model basePom) {
+        return basePom.getVersion() != null ? basePom.getVersion()
+                : basePom.getParent() != null && basePom.getParent().getVersion() != null
+                        ? basePom.getParent().getVersion()
+                        : null;
+    }
+
+    public static String getArtifactIdBase(String prefix, String cqArtifactId) {
+        if (cqArtifactId.startsWith(prefix)) {
+            return cqArtifactId.substring(prefix.length());
+        }
+        throw new IllegalStateException(
+                "Unexpected artifactId " + cqArtifactId + "; expected one starting with " + prefix);
+    }
+
 
 }

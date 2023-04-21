@@ -1,0 +1,238 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.l2x6.cq.maven.doc;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.apache.camel.tooling.model.ArtifactModel;
+import org.apache.maven.plugin.MojoExecutionException;
+import org.apache.maven.plugin.MojoFailureException;
+import org.apache.maven.plugins.annotations.Component;
+import org.apache.maven.plugins.annotations.Mojo;
+import org.apache.maven.plugins.annotations.Parameter;
+import org.eclipse.aether.RepositorySystem;
+import org.eclipse.aether.RepositorySystemSession;
+import org.eclipse.aether.repository.RemoteRepository;
+import org.l2x6.cq.common.CqCatalog;
+import org.l2x6.cq.common.CqCatalog.Flavor;
+import org.l2x6.cq.common.CqCatalog.GavCqCatalog;
+import org.l2x6.cq.maven.CqUtils;
+
+/**
+ * Performs the following tasks:
+ * <ul>
+ * <li>Deletes extension pages whose extensions do not exist anymore
+ * <li>Deletes yml descriptors for extensions that do not exist anymore.
+ * <li>Synchronizes nav.adoc with the reality
+ * <ul>
+ */
+@Mojo(name = "check-extension-pages", threadSafe = true)
+public class CheckExtensionPagesMojo extends AbstractDocGeneratorMojo {
+
+    private static final Pattern ADOC_ENDING_PATTERN = Pattern.compile("\\.adoc$");
+    private static final Pattern YML_ENDING_PATTERN = Pattern.compile("\\.yml$");
+
+    /**
+     * The directory relative to which the catalog data is read.
+     */
+    @Parameter(defaultValue = "${project.build.directory}/classes", property = "cq.catalogBaseDir")
+    File catalogBaseDir;
+
+    /**
+     * The path to the docs module base directory
+     */
+    @Parameter(defaultValue = "${maven.multiModuleProjectDirectory}/docs")
+    File docsBaseDir;
+
+    /**
+     * The version of Camel we depend on
+     */
+    @Parameter(property = "camel.version")
+    String camelVersion;
+
+    /**
+     * If {@code true} only extension Maven modules are considered to exist which are reachable through a chain of
+     * {@code <module>} elements from the root Maven module; otherwise it is enough for an extension to be considered
+     * existent if its {@code runtime/pom.xml} exists although it is not reachable through {@code <module>} elements.
+     *
+     * @since 2.16.0
+     */
+    @Parameter(property = "camel-quarkus.extension.finder.strict", defaultValue = "true")
+    boolean strict;
+
+    /**
+     * The path to the navigation document.
+     */
+    @Parameter(defaultValue = "${maven.multiModuleProjectDirectory}/docs/modules/ROOT/nav.adoc")
+    File navFile;
+
+    @Parameter(defaultValue = "${settings.localRepository}", readonly = true)
+    String localRepository;
+
+    @Parameter(defaultValue = "${project.remoteProjectRepositories}", readonly = true, required = true)
+    List<RemoteRepository> repositories;
+
+    @Component
+    private RepositorySystem repoSystem;
+
+    @Parameter(defaultValue = "${repositorySystemSession}", readonly = true, required = true)
+    private RepositorySystemSession repoSession;
+
+    /**
+     * Execute goal.
+     *
+     * @throws MojoExecutionException execution of the main class or one of the
+     *                                threads it generated failed.
+     * @throws MojoFailureException   something bad happened...
+     */
+    @Override
+    public void execute() throws MojoExecutionException, MojoFailureException {
+        final Path docsBasePath = docsBaseDir.toPath();
+
+        camelBits(docsBasePath);
+        extensions(docsBasePath);
+
+    }
+
+    void camelBits(Path docsBasePath) {
+        final CqCatalog cqCatalog = new CqCatalog(catalogBaseDir.toPath(), Flavor.camelQuarkus);
+
+        final Path referenceDir = docsBasePath.resolve("modules/ROOT/examples");
+        try (GavCqCatalog camelCatalog = GavCqCatalog.open(
+                Paths.get(localRepository), Flavor.camel, camelVersion,
+                repositories, repoSystem, repoSession)) {
+
+            CqCatalog.kinds().forEach(kind -> {
+                final Set<String> cqNames = cqCatalog.models(kind)
+                        .filter(CqCatalog::isFirstScheme)
+                        .map(CqCatalog::toCamelDocsModel)
+                        .map(ArtifactModel::getName)
+                        .collect(Collectors.toSet());
+                final Set<String> camelNames = camelCatalog.models(kind)
+                        .filter(CqCatalog::isFirstScheme)
+                        .map(CqCatalog::toCamelDocsModel)
+                        .map(ArtifactModel::getName)
+                        .collect(Collectors.toSet());
+
+                final Path kindDir = referenceDir.resolve(CqCatalog.kindPlural(kind));
+                try {
+                    Files.createDirectories(kindDir);
+                } catch (IOException e) {
+                    throw new RuntimeException("Could not create " + kindDir, e);
+                }
+                try (Stream<Path> kindFiles = Files.list(kindDir)) {
+                    kindFiles.forEach(kindFile -> {
+                        final String artifactIdBase = YML_ENDING_PATTERN.matcher(kindFile.getFileName().toString())
+                                .replaceAll("");
+                        if (cqNames.contains(artifactIdBase)) {
+                            /* Nothing to do, this should have been done by UpdateExtensionDocPageMojo */
+                        } else {
+                            try {
+                                Files.delete(kindFile);
+                            } catch (IOException e) {
+                                throw new RuntimeException("Could not delete " + kindFile, e);
+                            }
+                        }
+                    });
+                } catch (IOException e) {
+                    throw new RuntimeException("Could not list " + kindDir, e);
+                }
+            });
+        }
+
+    }
+
+    void extensions(Path docsBasePath) {
+
+        final Set<String> artifactIdBases = new HashSet<>();
+        final Set<CamelQuarkusExtension> extensions = new TreeSet<>(Comparator.comparing(e -> e.getName().get()));
+        findExtensions(strict)
+                .forEach(ext -> {
+                    final String artifactIdBase = ext.getArtifactIdBase();
+                    artifactIdBases.add(artifactIdBase);
+                    final Path runtimePomXmlPath = ext.getExtensionDir().resolve("runtime/pom.xml")
+                            .toAbsolutePath().normalize();
+                    extensions.add(CamelQuarkusExtension.read(runtimePomXmlPath));
+                });
+
+        final String extLinks = extensions.stream()
+                .map(m -> "*** xref:reference/extensions/" + m.getRuntimeArtifactIdBase() + ".adoc[" + m.getName().get() + "]")
+                .collect(Collectors.joining("\n"));
+        replace(navFile.toPath(), "extensions", extLinks);
+
+        final Path docsExtensionsDir = docsBasePath.resolve("modules/ROOT/pages/reference/extensions");
+        try (Stream<Path> docPages = Files.list(docsExtensionsDir)) {
+            docPages
+                    .filter(docPagePath -> !artifactIdBases
+                            .contains(ADOC_ENDING_PATTERN.matcher(docPagePath.getFileName().toString()).replaceAll("")))
+                    .forEach(docPagePath -> {
+                        try {
+                            Files.delete(docPagePath);
+                        } catch (IOException e) {
+                            throw new RuntimeException("Could not delete " + docPagePath, e);
+                        }
+                    });
+        } catch (IOException e) {
+            throw new RuntimeException("Could not list " + docsExtensionsDir, e);
+        }
+    }
+
+    void replace(Path path, String replacementKey, String value) {
+        try {
+            final String oldDocument = new String(Files.readAllBytes(path), encoding);
+            final String newDocument = replace(oldDocument, path, replacementKey, value);
+            if (!oldDocument.equals(newDocument)) {
+                try {
+                    Files.write(path, newDocument.getBytes(encoding));
+                } catch (IOException e) {
+                    throw new RuntimeException("Could not write to " + path, e);
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Could not read from " + path, e);
+        }
+    }
+
+    static String replace(String document, Path documentPath, String replacementKey, String value) {
+        final Pattern pat = Pattern.compile("(" + Pattern.quote("// " + replacementKey + ": START\n") + ")(.*)("
+                + Pattern.quote("// " + replacementKey + ": END\n") + ")", Pattern.DOTALL);
+
+        final Matcher m = pat.matcher(document);
+
+        final StringBuffer sb = new StringBuffer(document.length());
+        if (m.find()) {
+            m.appendReplacement(sb, "$1" + Matcher.quoteReplacement(value) + "$3");
+        } else {
+            throw new IllegalStateException("Could not find " + pat.pattern() + " in " + documentPath + ":\n\n" + document);
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+}

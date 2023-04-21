@@ -72,12 +72,63 @@ public abstract class AbstractExtensionListMojo extends AbstractMojo {
         return charset;
     }
 
+
     Stream<ExtensionModule> findExtensions() {
+        return findExtensions(true);
+    }
+
+    /**
+     * @param  strict if {@code true} only Maven modules are considered that are reachable over a {@code <module>}
+     *                element from the root module; otherwise also unreachable modules will be returned.
+     * @return
+     */
+    Stream<ExtensionModule> findExtensions(boolean strict) {
         getSkipArtifactIdBases();
-        return CqUtils.findExtensions(
+        final Stream<ExtensionModule> strictModulesStream = CqUtils.findExtensions(
                 getRootModuleDirectory(),
                 getTree().getModulesByGa().values(),
                 artifactIdBase -> !skipArtifactIdBasePatterns.matchesAny(artifactIdBase));
+        if (strict) {
+            return strictModulesStream;
+        } else {
+            final Collection<ExtensionModule> strictModules = strictModulesStream
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            final Set<ExtensionModule> result = new TreeSet<>();
+            strictModules.stream()
+                    .map(module -> module.getExtensionDir().getParent())
+                    .distinct()
+                    .forEach(extensionDir -> {
+
+                        try (Stream<Path> files = Files.list(extensionDir)) {
+                            files
+                                    .filter(Files::isDirectory)
+                                    .map(extensionDirectory -> extensionDirectory.resolve("runtime/pom.xml"))
+                                    .filter(Files::isRegularFile)
+                                    .forEach(runtimePomXmlPath -> {
+                                        String artifactId = null;
+                                        try (Reader r = Files.newBufferedReader(runtimePomXmlPath, StandardCharsets.UTF_8)) {
+                                            final MavenXpp3Reader rxppReader = new MavenXpp3Reader();
+                                            final Model model = rxppReader.read(r);
+                                            artifactId = model.getArtifactId();
+                                        } catch (IOException | XmlPullParserException e) {
+                                            throw new RuntimeException("Could not read " + runtimePomXmlPath);
+                                        }
+                                        if (!artifactId.startsWith("camel-quarkus-")) {
+                                            throw new IllegalStateException(
+                                                    "Should start with 'camel-quarkus-': " + artifactId);
+                                        }
+                                        final String artifactIdBase = artifactId.substring("camel-quarkus-".length());
+                                        if (!skipArtifactIdBasePatterns.matchesAny(artifactIdBase)) {
+                                            result.add(new ExtensionModule(runtimePomXmlPath.getParent().getParent(),
+                                                    artifactIdBase));
+                                        }
+                                    });
+                        } catch (IOException e) {
+                            throw new RuntimeException("Could not list " + extensionDir, e);
+                        }
+                    });
+            return result.stream();
+        }
     }
 
     PatternSet getSkipArtifactIdBases() {

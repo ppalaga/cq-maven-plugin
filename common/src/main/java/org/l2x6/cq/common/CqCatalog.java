@@ -39,7 +39,11 @@ import org.apache.camel.catalog.impl.CatalogHelper;
 import org.apache.camel.tooling.model.ArtifactModel;
 import org.apache.camel.tooling.model.BaseModel;
 import org.apache.camel.tooling.model.ComponentModel;
+import org.apache.camel.tooling.model.DataFormatModel;
 import org.apache.camel.tooling.model.EipModel;
+import org.apache.camel.tooling.model.JsonMapper;
+import org.apache.camel.tooling.model.LanguageModel;
+import org.apache.camel.tooling.model.OtherModel;
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.RepositorySystemSession;
 import org.eclipse.aether.repository.RemoteRepository;
@@ -100,7 +104,7 @@ public class CqCatalog {
         this.catalog = new DefaultCamelCatalog(true);
     }
 
-    public List<String> toCamelArtifactIdBase(String cqArtifactIdBase) {
+    public static List<String> toCamelArtifactIdBase(String cqArtifactIdBase) {
         if ("core".equals(cqArtifactIdBase)) {
             return Arrays.asList("camel-base", "camel-core-languages");
         } else if ("reactive-executor".equals(cqArtifactIdBase)) {
@@ -180,6 +184,21 @@ public class CqCatalog {
         }
     }
 
+
+    public static boolean hasAlternativeScheme(ArtifactModel<?> model, String scheme) {
+        if (scheme.equals(model.getName())) {
+            return true;
+        } else if (model.getKind().equals("component")) {
+            final String altSchemes = ((ComponentModel) model).getAlternativeSchemes();
+            if (altSchemes == null || altSchemes.isEmpty()) {
+                return false;
+            } else {
+                return altSchemes.endsWith("," + scheme) || altSchemes.indexOf("," + scheme + ",") > 0;
+            }
+        } else {
+            return false;
+        }
+    }
     public static Comparator<ArtifactModel<?>> compareArtifactId() {
         return (m1, m2) -> m1.getArtifactId().compareTo(m2.getArtifactId());
     }
@@ -201,6 +220,66 @@ public class CqCatalog {
             }
         }
 
+    }
+
+
+    public static ArtifactModel<?> findFirstSchemeModel(ArtifactModel<?> model, List<ArtifactModel<?>> models) {
+        if (model.getKind().equals("component")) {
+            final String altSchemes = ((ComponentModel) model).getAlternativeSchemes();
+            if (altSchemes == null || altSchemes.isEmpty()) {
+                return model;
+            } else {
+                final String scheme = model.getName();
+                return models.stream()
+                        .filter(m -> "component".equals(m.getKind()))
+                        .filter(CqCatalog::isFirstScheme)
+                        .filter(m -> CqCatalog.hasAlternativeScheme(m, scheme))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Could not find first scheme model for scheme " + scheme + " in " + models));
+            }
+        } else {
+            return model;
+        }
+    }
+
+    public static List<ArtifactModel<?>> primaryModel(Stream<ArtifactModel<?>> input) {
+        final List<ArtifactModel<?>> models = input
+                .filter(CqCatalog::isFirstScheme)
+                .filter(m -> !m.getName().startsWith("google-") || !m.getName().endsWith("-stream")) // ignore the
+                // google stream
+                // component
+                // variants
+                .collect(Collectors.toList());
+        if (models.size() > 1) {
+            List<ArtifactModel<?>> componentModels = models.stream()
+                    .filter(m -> m.getKind().equals("component"))
+                    .collect(Collectors.toList());
+            if (componentModels.size() == 1) {
+                /* If there is only one component take that one */
+                return componentModels;
+            }
+        }
+        return models;
+    }
+
+    public static ArtifactModel<?> toCamelDocsModel(ArtifactModel<?> m) {
+        if ("imap".equals(m.getName())) {
+            final ComponentModel clone = (ComponentModel) CqCatalog.cloneArtifactModel(m);
+            clone.setName("mail");
+            clone.setTitle("Mail");
+            return clone;
+        }
+        if (m.getName().startsWith("bindy")) {
+            final DataFormatModel clone = (DataFormatModel) CqCatalog.cloneArtifactModel(m);
+            clone.setName("bindy");
+            return clone;
+        }
+        return m;
+    }
+
+    public static String kindPlural(Kind kind) {
+        return kind.name() + "s";
     }
 
     static class CqRuntimeProvider implements RuntimeProvider {
@@ -342,6 +421,35 @@ public class CqCatalog {
     public BaseModel<?> load(org.apache.camel.catalog.Kind kind, String name) {
         return catalog.model(kind, name);
     }
+
+    public static ArtifactModel<?> cloneArtifactModel(ArtifactModel<?> model) {
+        final Kind kind = Kind.valueOf(model.getKind());
+        switch (kind) {
+        case component:
+            return JsonMapper.generateComponentModel(JsonMapper.asJsonObject((ComponentModel) model));
+        case dataformat:
+            return JsonMapper.generateDataFormatModel(JsonMapper.asJsonObject((DataFormatModel) model));
+        case language:
+            return JsonMapper.generateLanguageModel(JsonMapper.asJsonObject((LanguageModel) model));
+        case other:
+            return JsonMapper.generateOtherModel(JsonMapper.asJsonObject((OtherModel) model));
+        default:
+            throw new IllegalArgumentException("Unexpected kind " + kind);
+        }
+
+    }
+
+    public static String getArtifactIdBase(ArtifactModel<?> model) {
+        final String artifactId = model.getArtifactId();
+        if (artifactId.startsWith("camel-quarkus-")) {
+            return artifactId.substring("camel-quarkus-".length());
+        } else if (artifactId.startsWith("camel-")) {
+            return artifactId.substring("camel-".length());
+        }
+        throw new IllegalStateException(
+                "Unexpected artifactId " + artifactId + "; expected one starting with camel-quarkus- or camel-");
+    }
+
 
     public static class GavCqCatalog extends CqCatalog implements AutoCloseable {
 
