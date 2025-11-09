@@ -44,6 +44,7 @@ import org.l2x6.pom.tuner.MavenSourceTree;
 import org.l2x6.pom.tuner.PomTransformer;
 import org.l2x6.pom.tuner.PomTransformer.ContainerElement;
 import org.l2x6.pom.tuner.PomTransformer.NodeGavtcs;
+import org.l2x6.pom.tuner.PomTransformer.ProfileElement;
 import org.l2x6.pom.tuner.PomTransformer.SimpleElementWhitespace;
 import org.l2x6.pom.tuner.PomTransformer.Transformation;
 import org.l2x6.pom.tuner.PomTransformer.TransformationContext;
@@ -248,7 +249,7 @@ public class FormatPomsMojo extends AbstractExtensionListMojo {
             final Comparator<Gavtcs> comparator = Gavtcs.scopeAndTypeFirstComparator();
             final Function<Gavtcs, Optional<Gavtcs>> dependencyMapper = Gavtcs
                     .deploymentVirtualMapper(isExtension);
-            final Set<? extends Gavtcs> deps = context.getDependencies();
+            final Set<? extends Gavtcs> deps = context.getProject().getDependencies();
             final Set<Gavtcs> newMappedDeps = new TreeSet<>(comparator);
 
             for (Gavtcs dep : deps) {
@@ -259,7 +260,7 @@ public class FormatPomsMojo extends AbstractExtensionListMojo {
                         });
             }
 
-            final Optional<ContainerElement> optionalProfile = context
+            final Optional<ProfileElement> optionalProfile = context
                     .getProfileParent("virtualDependencies");
             if (!newMappedDeps.isEmpty()) {
                 final ContainerElement profile;

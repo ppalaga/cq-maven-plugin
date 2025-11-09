@@ -602,7 +602,7 @@ public class SyncExamplesFromUpstreamMojo extends AbstractMojo {
 
                         // Remove explicit version for quarkus-artemis-jms since these dependencies are in the productized platform BOMs
                         if (camelQuarkusPlatformArtifactId.equals("quarkus-camel-bom")) {
-                            context.getDependencies()
+                            context.getProject().getDependencies()
                                     .stream()
                                     .filter(dependency -> dependency.getArtifactId().equals("quarkus-artemis-jms"))
                                     .findFirst()

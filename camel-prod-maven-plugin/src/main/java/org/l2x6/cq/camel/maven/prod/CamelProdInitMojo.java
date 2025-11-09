@@ -19,8 +19,6 @@ package org.l2x6.cq.camel.maven.prod;
 import java.io.File;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
-import java.util.Comparator;
-import java.util.Map;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import org.apache.maven.artifact.versioning.ComparableVersion;
@@ -146,7 +144,7 @@ public class CamelProdInitMojo extends AbstractMojo {
 
                     getLog().info("Adding to pom.xml: camel-community-version property");
                     props.addChildTextElementIfNeeded("camel-community-version", version,
-                            Comparator.comparing(Map.Entry::getKey, Comparators.beforeFirst()));
+                            Comparators.elementName(Comparators.beforeFirst()));
 
                     /*
                      * Set cq-plugin.version to the version of the currently executing mojo if it is newer than the
@@ -184,7 +182,7 @@ public class CamelProdInitMojo extends AbstractMojo {
                             .forEach(pattern -> excludes.addChildTextElementIfNeeded(
                                     "exclude",
                                     pattern,
-                                    Comparator.comparing(Map.Entry::getValue, Comparators.beforeFirst())));
+                                    Comparators.textContent(Comparators.beforeFirst())));
                 });
 
     }

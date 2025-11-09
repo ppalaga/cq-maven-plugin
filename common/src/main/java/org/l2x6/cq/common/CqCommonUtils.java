@@ -38,7 +38,9 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -87,13 +89,16 @@ import org.l2x6.cq.common.sync.SyncExpressions.Builder;
 import org.l2x6.pom.tuner.MavenSourceTree.ActiveProfiles;
 import org.l2x6.pom.tuner.PomTransformer;
 import org.l2x6.pom.tuner.PomTransformer.ContainerElement;
+import org.l2x6.pom.tuner.PomTransformer.ProjectElement;
 import org.l2x6.pom.tuner.PomTransformer.SimpleElementWhitespace;
 import org.l2x6.pom.tuner.PomTransformer.Transformation;
 import org.l2x6.pom.tuner.PomTransformer.TransformationContext;
+import org.l2x6.pom.tuner.PomTransformer.Transformer;
 import org.l2x6.pom.tuner.PomTunerUtils;
 import org.l2x6.pom.tuner.model.Ga;
 import org.l2x6.pom.tuner.model.Gavtcs;
 import org.l2x6.pom.tuner.model.Profile;
+import org.l2x6.pom.tuner.transform.properties;
 import org.w3c.dom.Comment;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -248,15 +253,52 @@ public class CqCommonUtils {
 
     public static void updateVirtualDependencies(Charset charset, SimpleElementWhitespace simpleElementWhitespace,
             final Set<Gavtcs> allVirtualExtensions, final Path pomXmlPath) {
-        new PomTransformer(pomXmlPath, charset, simpleElementWhitespace)
-                .transform(
-                        Transformation.updateDependencySubset(
+        PomTransformer.builder()
+                .charset(charset)
+                .simpleElementWhitespace(simpleElementWhitespace)
+                .transformers(
+                        updateDependencySubset(
                                 gavtcs -> gavtcs.isVirtual(),
                                 allVirtualExtensions,
                                 Gavtcs.scopeAndTypeFirstComparator(),
                                 VIRTUAL_DEPS_INITIAL_COMMENT),
-                        Transformation.removeProperty(true, true, "mvnd.builder.rule"),
-                        Transformation.removeContainerElementIfEmpty(true, true, true, "properties"));
+                        properties.remove("mvnd.builder.rule"),
+                        properties.removeEmptyParent())
+                .transform(pomXmlPath);
+    }
+
+    public static Transformer updateDependencySubset(
+            Predicate<Gavtcs> isSubsetMember,
+            Collection<Gavtcs> newSubset,
+            Comparator<Gavtcs> comparator,
+            String initialComment) {
+        return (TransformationContext context) -> {
+            Set<Gavtcs> depsToAdd = new TreeSet<>(comparator);
+            depsToAdd.addAll(newSubset);
+
+            final Gavtcs firstSubsetNode = depsToAdd.isEmpty() ? null : depsToAdd.iterator().next();
+
+            final ProjectElement project = context.getProject();
+            Set<? extends Gavtcs> deps = project.getDependencies();
+            for (Gavtcs dep : deps) {
+                if (isSubsetMember.test(dep)) {
+                    if (!newSubset.contains(dep)) {
+                        project.removeDependency(dep, true, true);
+                    } else {
+                        depsToAdd.remove(dep);
+                    }
+                }
+            }
+            for (Gavtcs dep : depsToAdd) {
+                project.addDependencyIfNeeded(dep, comparator);
+            }
+
+            if (initialComment != null && firstSubsetNode != null) {
+                context.getProject().findDependency(firstSubsetNode)
+                        .ifPresent(firstDepNode -> firstDepNode.prependCommentIfNeeded(initialComment));
+            }
+
+        };
     }
 
     public static String virtualDepsCommentXPath() {

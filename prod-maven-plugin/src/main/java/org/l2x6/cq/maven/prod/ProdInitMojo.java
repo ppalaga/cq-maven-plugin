@@ -25,7 +25,6 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
@@ -221,29 +220,29 @@ public class ProdInitMojo extends AbstractMojo {
                     getLog().info("Adding to pom.xml: camel-community-version property");
                     props.addChildTextElementIfNeeded("camel-community-version",
                             "${camel.major.minor}." + camelVersion.split("\\.")[2],
-                            Comparator.comparing(Map.Entry::getKey, Comparators.before("camel.version")));
+                            Comparators.elementName(Comparators.before("camel.version")));
 
                     getLog().info("Adding to pom.xml: camel-quarkus-community.version property");
                     props.addChildTextElementIfNeeded("camel-quarkus-community.version", version,
-                            Comparator.comparing(Map.Entry::getKey, Comparators.before("cassandra-quarkus.version")));
+                            Comparators.elementName(Comparators.before("cassandra-quarkus.version")));
 
                     if (camelKameletsVersion == null) {
                         camelKameletsVersion = "${camel.version}";
                     }
                     getLog().info("Adding to pom.xml: camel-kamelets.version property");
                     props.addChildTextElementIfNeeded("camel-kamelets.version", camelKameletsVersion,
-                            Comparator.comparing(Map.Entry::getKey, Comparators.before("cassandra-quarkus.version")));
+                            Comparators.elementName(Comparators.before("cassandra-quarkus.version")));
 
                     if (camelFusesourceVersion == null) {
                         camelFusesourceVersion = "${camel.version}";
                     }
                     getLog().info("Adding to pom.xml: camel-fusesource.version property " + camelFusesourceVersion);
                     props.addChildTextElementIfNeeded("camel-fusesource.version", camelFusesourceVersion,
-                            Comparator.comparing(Map.Entry::getKey, Comparators.before("camel-kamelets.version")));
+                            Comparators.elementName(Comparators.before("camel-kamelets.version")));
 
                     getLog().info("Adding to pom.xml: async-profiler.version property " + asyncProfilerVersion);
                     props.addChildTextElementIfNeeded("async-profiler.version", asyncProfilerVersion,
-                            Comparator.comparing(Map.Entry::getKey, Comparators.after("camel-kamelets.version")));
+                            Comparators.elementName(Comparators.after("camel-kamelets.version")));
 
                     addProperty(
                             props,
@@ -263,26 +262,26 @@ public class ProdInitMojo extends AbstractMojo {
                     //ctgClient.version is hardcoded as 9.2, we do nor expect this value to be changed in the future
                     getLog().info("Adding to pom.xml: ctgClient.version property 9.2 ");
                     props.addChildTextElementIfNeeded("ctgClient.version", "9.2",
-                            Comparator.comparing(Map.Entry::getKey, Comparators.before("commons-validator.version")));
+                            Comparators.elementName(Comparators.before("commons-validator.version")));
 
                     //value for cics.container.image is hardcoded, if change is required - manual fix has to be done in the prod branch
                     getLog().info(
                             "Adding to pom.xml: cics.container.image property images.paas.redhat.com/fuseqe/ibm-cicstg-container-linux-x86-trial:10.1");
                     props.addChildTextElementIfNeeded("cics.container.image",
                             "images.paas.redhat.com/fuseqe/ibm-cicstg-container-linux-x86-trial:10.1trial",
-                            Comparator.comparing(Map.Entry::getKey, Comparators.before("cassandra.container.image")));
+                            Comparators.elementName(Comparators.before("cassandra.container.image")));
 
                     getLog().info("Adding to pom.xml: quarkus-community.version property");
                     props.addChildTextElementIfNeeded("quarkus-community.version", quarkusVersion,
-                            Comparator.comparing(Map.Entry::getKey, Comparators.after("quarkus.version")));
+                            Comparators.elementName(Comparators.after("quarkus.version")));
 
                     getLog().info("Adding to pom.xml: quarkiverse-cxf-community.version property");
                     props.addChildTextElementIfNeeded("quarkiverse-cxf-community.version", quarkiverseCxfVersion,
-                            Comparator.comparing(Map.Entry::getKey, Comparators.after("quarkiverse-cxf.version")));
+                            Comparators.elementName(Comparators.after("quarkiverse-cxf.version")));
 
                     getLog().info("Adding to pom.xml: graalvm-community.version property");
                     props.addChildTextElementIfNeeded("graalvm-community.version", "${graalvm.version}",
-                            Comparator.comparing(Map.Entry::getKey, Comparators.after("graalvm.version")));
+                            Comparators.elementName(Comparators.after("graalvm.version")));
 
                     // Explicitly use the following version for xalan as it has a CVE fix and a class loading fix currently unreleased in community.
                     props.getChildContainerElement("xalan.version").ifPresent(xalanVersion -> {
@@ -364,7 +363,7 @@ public class ProdInitMojo extends AbstractMojo {
                             .orElseThrow(() -> new IllegalStateException(
                                     "Could not find <mappings> in the cofiguration of com.mycila:license-maven-plugin"));
                     mappingsElement.addChildTextElementIfNeeded("Jenkinsfile.redhat", "SLASHSTAR_STYLE",
-                            Comparator.comparing(Map.Entry::getKey, Comparators.after("Jenkinsfile")));
+                            Comparators.elementName(Comparators.after("Jenkinsfile")));
 
                     /* Add cq-prod-maven-plugin twice */
                     final Gavtcs cqProdMavenPluginGav = new Gavtcs("org.l2x6.cq", "cq-prod-maven-plugin",
@@ -505,9 +504,9 @@ public class ProdInitMojo extends AbstractMojo {
                                     "resolutionEntryPointIncludes")
                             .get();
                     config.addChildTextElementIfNeeded("resolutionEntryPointInclude", "io.quarkiverse.artemis:*",
-                            Comparator.comparing(Map.Entry::getValue, Comparators.before("io.quarkiverse.cxf:*")));
+                            Comparators.textContent(Comparators.before("io.quarkiverse.cxf:*")));
                     config.addChildTextElementIfNeeded("resolutionEntryPointInclude", "org.apache.camel.kamelets:*",
-                            Comparator.comparing(Map.Entry::getValue, Comparators.after("org.apache.camel.quarkus:*")));
+                            Comparators.textContent(Comparators.after("org.apache.camel.quarkus:*")));
 
                     /* Change quarkus-enforcer-rules to use the community */
                     final String quarkusCommunityVersion = "${quarkus-community.version}";
@@ -542,7 +541,7 @@ public class ProdInitMojo extends AbstractMojo {
                     Gavtcs artemisBom = new Gavtcs("io.quarkiverse.artemis", "quarkus-artemis-bom",
                             "${quarkiverse-artemis.version}",
                             "pom", null, "import");
-                    context.removeManagedDependency(artemisBom, true, true);
+                    context.getProject().removeManagedDependency(artemisBom, true, true);
                 });
 
         /* Edit extensions-jvm/pom.xml to add cics & sap extension */
@@ -665,7 +664,7 @@ public class ProdInitMojo extends AbstractMojo {
 
         log.accept("Adding to pom.xml: " + artifactId + ".version property " + initialVersion);
         final TextElement textElement = props.addChildTextElementIfNeeded(artifactId + ".version", initialVersion,
-                Comparator.comparing(Map.Entry::getKey, where));
+                Comparators.elementName(where));
         if (trailingComment != null) {
             final Element n = textElement.getNode();
             final Comment cmt = n.getOwnerDocument().createComment(trailingComment);

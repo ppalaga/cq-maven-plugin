@@ -86,7 +86,7 @@ public class RefactorMojo extends AbstractMojo {
 
                 new PomTransformer(pomXmlPath, charset, simpleElementWhitespace).transform(
                         (Document document, TransformationContext context) -> {
-                            final List<NodeGavtcs> virtualDeps = context.getDependencies().stream()
+                            final List<NodeGavtcs> virtualDeps = context.getProject().getDependencies().stream()
                                     .filter(Gavtcs::isVirtualDeployment)
                                     .collect(Collectors.toList());
 

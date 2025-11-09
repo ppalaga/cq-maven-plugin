@@ -931,7 +931,7 @@ public class ProdExcludesMojo extends AbstractMojo {
 
     Transformation replaceManagedArtifactId(final String findArtifactId, final String replaceArtifactId) {
         return (Document document, TransformationContext context) -> {
-            final NodeGavtcs bom = context.getManagedDependencies().stream()
+            final NodeGavtcs bom = context.getProject().getManagedDependencies().stream()
                     .filter(dep -> findArtifactId.equals(dep.getArtifactId()))
                     .findFirst()
                     .get();
