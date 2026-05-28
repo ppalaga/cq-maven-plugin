@@ -92,6 +92,7 @@ import org.l2x6.pom.tuner.model.Ga;
 import org.l2x6.pom.tuner.model.Gav;
 import org.l2x6.pom.tuner.model.GavPattern;
 import org.l2x6.pom.tuner.model.GavSet;
+import org.l2x6.pom.tuner.model.Gavtc;
 import org.l2x6.pom.tuner.model.Gavtcs;
 import org.l2x6.pom.tuner.model.GavtcsSet;
 import org.l2x6.pom.tuner.model.Module;
@@ -183,10 +184,10 @@ public class FlattenBomTask {
     }
 
     static class DependencyCollector implements DependencyVisitor {
-        private final Set<Ga> allTransitives = new TreeSet<>();
+        private final Set<Gavtcs> allTransitives = new TreeSet<>();
         private final GavSet excludes;
         private final BiConsumer<Ga, Ga> exclusionConsumer;
-        private final Deque<Ga> stack = new ArrayDeque<>();
+        private final Deque<Gavtcs> stack = new ArrayDeque<>();
         private final GavSet bannedDependencies;
         private final Predicate<Ga> isCurrentBomEntry;
         private final Predicate<Ga> isCurrentBomOrIncludedEntry;
@@ -234,12 +235,12 @@ public class FlattenBomTask {
         @Override
         public boolean visitEnter(DependencyNode node) {
             final Artifact a = node.getArtifact();
-            final Ga ga = new Ga(a.getGroupId(), a.getArtifactId());
+            final Gavtc gavtc = new Gavtc(a.getGroupId(), a.getArtifactId(), a.getVersion(), a.getExtension(), a.getClassifier());
             DependencyNode winner;
             if (format && (winner = (DependencyNode) node.getData().get(ConflictResolver.NODE_DATA_WINNER)) != null) {
                 /* We use ConflictResolver.CONFIG_PROP_VERBOSE = true only when format is true */
                 /* Recurse the winner instead of the current looser */
-                if (!stack.contains(ga)) {
+                if (!stack.contains(gavtc)) {
                     winner.accept(this);
                 }
                 return false; // should have empty children anyway as stated in class level JavaDoc of ConflictResolver
@@ -247,6 +248,7 @@ public class FlattenBomTask {
 
             boolean result = true;
             if (!excludes.contains(a.getGroupId(), a.getArtifactId())) {
+                Ga ga = gavtc.toGa();
                 if (bannedDependencies.contains(ga)) {
                     result = false;
                     /*
@@ -289,17 +291,17 @@ public class FlattenBomTask {
                                             + "    </exclusion>\n"));
                         } else {
                             throw new IllegalStateException(
-                                    "Cannot link banned dependency to any own or included BOM entry:\n    " + ga + "\n    -> "
+                                    "Cannot link banned dependency to any own or included BOM entry:\n    " + gavtc + "\n    -> "
                                             + stack.stream().map(Ga::toString).collect(Collectors.joining("\n    -> ")));
                         }
 
                     }
                 }
-                allTransitives.add(ga);
+                allTransitives.add(gavtc);
 
             }
-            stack.push(ga);
-            if (suspects.contains(ga)) {
+            stack.push(gavtc);
+            if (suspects.contains(gavtc)) {
                 suspectConsumer.accept(stack);
             }
             return result;
@@ -375,16 +377,10 @@ public class FlattenBomTask {
         }
     }
 
-    private static class RequiredGas {
-
-        private final Set<Ga> gas;
-        private final Map<Ga, Set<Ga>> expectedExclusions;
-
-        public RequiredGas(Set<Ga> gas, Map<Ga, Set<Ga>> expectedExclusions) {
-            this.gas = gas;
-            this.expectedExclusions = expectedExclusions;
+    private static record RequiredGas(Set<Gavtcs> gavtcs, Set<Ga> gas, Map<Ga, Set<Ga>> expectedExclusions) {
+        public static RequiredGas of(Set<Gavtcs> gavtcs, Map<Ga, Set<Ga>> expectedExclusions) {
+            return new RequiredGas(gavtcs, gavtcs.stream().map(Gavtcs::toGa).collect(Collectors.toCollection(TreeSet::new)), expectedExclusions);
         }
-
     }
 
     private static class ExpectedExclusions {
@@ -524,11 +520,13 @@ public class FlattenBomTask {
             final GavSet excludedByOrigin = GavSet.builder()
                     .includes(originExcludes == null ? Collections.emptyList() : originExcludes)
                     .build();
+            /* Root artifacts in Domino speak */
             final GavSet resolveSet = GavSet.builder()
                     .includes(resolutionEntryPointIncludes == null ? Collections.emptyList() : resolutionEntryPointIncludes)
                     .excludes(resolutionEntryPointExcludes == null ? Collections.emptyList() : resolutionEntryPointExcludes)
                     .build();
 
+            /* Domino is right that it is not necessary to keep resolutionExcludes and resolutionEntryPointExcludes apart */
             final GavtcsSet resolutionSet = GavtcsSet.builder()
                     .excludes(resolutionExcludes == null ? Collections.emptyList() : resolutionExcludes)
                     .build();
@@ -588,7 +586,7 @@ public class FlattenBomTask {
                         });
                     });
 
-            /* Collect the GAs required by our extensions */
+            /* Collect the transitive closure of all dependencies required by our extensions */
             final RequiredGas requiredGas = collectRequiredGas(
                     constraintsFilteredByOriginPlusAdditionalBoms,
                     constraintsFilteredByOrigin,
@@ -720,7 +718,7 @@ public class FlattenBomTask {
 
         final GavSet collectorExcludes = GavSet.builder().include(parent.getGroupId() + ":" + parent.getArtifactId())
                 .build();
-        final Set<Ga> allTransitives = new TreeSet<>();
+        final Set<Gavtcs> allTransitives = new TreeSet<>();
 
         final ExpectedExclusions expectedExclusions = new ExpectedExclusions();
 
@@ -800,8 +798,10 @@ public class FlattenBomTask {
                 .forEach(bomEntry -> applyTransformations(bomEntry, bomEntryTransformations, expectedExclusions::add));
         ;
 
-        allTransitives.addAll(t.getModulesByGa().keySet());
-        return new RequiredGas(Collections.unmodifiableSet(allTransitives),
+        ownManagedDependencies.stream()
+                .map(FlattenBomTask::toGavtcs)
+                .forEach(allTransitives::add);
+        return RequiredGas.of(Collections.unmodifiableSet(allTransitives),
                 unmodifiable(expectedExclusions.expectedExclusions));
     }
 
