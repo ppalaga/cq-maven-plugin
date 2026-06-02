@@ -16,6 +16,8 @@
  */
 package org.l2x6.cq.common;
 
+import static java.util.stream.Collectors.joining;
+
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
@@ -49,7 +51,9 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
 import javax.xml.XMLConstants;
+
 import org.apache.maven.model.Dependency;
 import org.apache.maven.model.DependencyManagement;
 import org.apache.maven.model.Exclusion;
@@ -97,8 +101,6 @@ import org.l2x6.pom.tuner.model.GavtcsSet;
 import org.l2x6.pom.tuner.model.Module;
 import org.l2x6.pom.tuner.model.Profile;
 import org.l2x6.pom.tuner.transform.Siblings;
-
-import static java.util.stream.Collectors.joining;
 
 public class FlattenBomTask {
     public static class BomEntryTransformation {
@@ -183,10 +185,10 @@ public class FlattenBomTask {
     }
 
     static class DependencyCollector implements DependencyVisitor {
-        private final Set<Gavtcs> allTransitives = new TreeSet<>();
+        private final Set<Gavtc> allTransitives = new TreeSet<>();
         private final GavSet excludes;
         private final BiConsumer<Ga, Ga> exclusionConsumer;
-        private final Deque<Gavtcs> stack = new ArrayDeque<>();
+        private final Deque<Ga> stack = new ArrayDeque<>();
         private final GavSet bannedDependencies;
         private final Predicate<Ga> isCurrentBomEntry;
         private final Predicate<Ga> isCurrentBomOrIncludedEntry;
@@ -234,12 +236,14 @@ public class FlattenBomTask {
         @Override
         public boolean visitEnter(DependencyNode node) {
             final Artifact a = node.getArtifact();
-            final Gavtc gavtc = new Gavtc(a.getGroupId(), a.getArtifactId(), a.getVersion(), a.getExtension(), a.getClassifier());
+            final Gavtc gavtc = new Gavtc(a.getGroupId(), a.getArtifactId(), a.getVersion(), a.getExtension(),
+                    a.getClassifier());
+            final Ga ga = gavtc.toGa();
             DependencyNode winner;
             if (format && (winner = (DependencyNode) node.getData().get(ConflictResolver.NODE_DATA_WINNER)) != null) {
                 /* We use ConflictResolver.CONFIG_PROP_VERBOSE = true only when format is true */
                 /* Recurse the winner instead of the current looser */
-                if (!stack.contains(gavtc)) {
+                if (!stack.contains(gavtc.toGa())) {
                     winner.accept(this);
                 }
                 return false; // should have empty children anyway as stated in class level JavaDoc of ConflictResolver
@@ -247,7 +251,6 @@ public class FlattenBomTask {
 
             boolean result = true;
             if (!excludes.contains(a.getGroupId(), a.getArtifactId())) {
-                Ga ga = gavtc.toGa();
                 if (bannedDependencies.contains(ga)) {
                     result = false;
                     /*
@@ -290,7 +293,8 @@ public class FlattenBomTask {
                                             + "    </exclusion>\n"));
                         } else {
                             throw new IllegalStateException(
-                                    "Cannot link banned dependency to any own or included BOM entry:\n    " + gavtc + "\n    -> "
+                                    "Cannot link banned dependency to any own or included BOM entry:\n    " + gavtc
+                                            + "\n    -> "
                                             + stack.stream().map(Ga::toString).collect(Collectors.joining("\n    -> ")));
                         }
 
@@ -299,8 +303,8 @@ public class FlattenBomTask {
                 allTransitives.add(gavtc);
 
             }
-            stack.push(gavtc);
-            if (suspects.contains(gavtc)) {
+            stack.push(ga);
+            if (suspects.contains(ga)) {
                 suspectConsumer.accept(stack);
             }
             return result;
@@ -376,9 +380,10 @@ public class FlattenBomTask {
         }
     }
 
-    private static record RequiredGas(Set<Gavtcs> gavtcs, Set<Ga> gas, Map<Ga, Set<Ga>> expectedExclusions) {
-        public static RequiredGas of(Set<Gavtcs> gavtcs, Map<Ga, Set<Ga>> expectedExclusions) {
-            return new RequiredGas(gavtcs, gavtcs.stream().map(Gavtcs::toGa).collect(Collectors.toCollection(TreeSet::new)), expectedExclusions);
+    private static record RequiredGas(Set<Gavtc> gavtcs, Set<Ga> gas, Map<Ga, Set<Ga>> expectedExclusions) {
+        public static RequiredGas of(Set<Gavtc> gavtcs, Map<Ga, Set<Ga>> expectedExclusions) {
+            return new RequiredGas(gavtcs, gavtcs.stream().map(Gavtc::toGa).collect(Collectors.toCollection(TreeSet::new)),
+                    expectedExclusions);
         }
     }
 
@@ -426,6 +431,7 @@ public class FlattenBomTask {
     private final List<Dependency> ownManagedDependencies;
     private final Path localRepositoryPath;
     private final List<Gav> additionalBoms;
+    private final boolean expand;
     private static final Pattern LOCATION_COMMENT_PATTERN = Pattern.compile("\\s*\\Q<!--#}\\E");
     public static final String DEFAULT_FLATTENED_REDUCED_VERBOSE_POM_FILE = "src/main/generated/flattened-reduced-verbose-pom.xml";
     public static final String DEFAULT_FLATTENED_REDUCED_POM_FILE = "src/main/generated/flattened-reduced-pom.xml";
@@ -443,11 +449,23 @@ public class FlattenBomTask {
             List<String> requiredBomEntryIncludes, List<String> requiredBomEntryExcludes,
             OnFailure onCheckFailure,
             MavenProject project,
-            Path rootModuleDirectory, Path fullPomPath, Path reducedVerbosePamPath,
-            Path reducedPomPath, Charset charset, Log log, List<RemoteRepository> repositories, RepositorySystem repoSystem,
-            RepositorySystemSession repoSession, Predicate<Profile> profiles, boolean format,
-            FlattenBomTask.InstallFlavor installFlavor, boolean quickly,
-            GavSet bannedDependencies, Path localRepositoryPath, List<Gav> additionalBoms) {
+            Path rootModuleDirectory,
+            Path fullPomPath,
+            Path reducedVerbosePamPath,
+            Path reducedPomPath,
+            Charset charset,
+            Log log,
+            List<RemoteRepository> repositories,
+            RepositorySystem repoSystem,
+            RepositorySystemSession repoSession,
+            Predicate<Profile> profiles,
+            boolean format,
+            FlattenBomTask.InstallFlavor installFlavor,
+            boolean quickly,
+            GavSet bannedDependencies,
+            Path localRepositoryPath,
+            List<Gav> additionalBoms,
+            boolean expand) {
         this.resolutionEntryPointIncludes = resolutionEntryPointIncludes;
         this.resolutionEntryPointExcludes = resolutionEntryPointExcludes;
         this.resolutionExcludes = resolutionExcludes;
@@ -485,6 +503,7 @@ public class FlattenBomTask {
         this.quickly = quickly;
         this.bannedDependencies = bannedDependencies;
         this.localRepositoryPath = localRepositoryPath;
+        this.expand = expand;
     }
 
     static List<FlattenBomTask.BomEntryTransformation> mergeTransformations(Path rootModuleDirectory,
@@ -523,7 +542,10 @@ public class FlattenBomTask {
                     .excludes(resolutionEntryPointExcludes == null ? Collections.emptyList() : resolutionEntryPointExcludes)
                     .build();
 
-            /* Domino is right that it is not necessary to keep resolutionExcludes and resolutionEntryPointExcludes apart */
+            /*
+             * Domino is right that it is not necessary to keep resolutionExcludes and resolutionEntryPointExcludes
+             * apart
+             */
             final GavtcsSet resolutionSet = GavtcsSet.builder()
                     .excludes(resolutionExcludes == null ? Collections.emptyList() : resolutionExcludes)
                     .build();
@@ -592,10 +614,24 @@ public class FlattenBomTask {
                     resolveSet);
 
             /* Exclude non-required constraints */
-            final List<Dependency> requiredConstraints = Collections.unmodifiableList(constraintsFilteredByOrigin.stream()
+            final Set<Gavtc> requiredGavtcs = new LinkedHashSet<>();
+            final List<Dependency> requiredConstraints = new ArrayList<>();
+            constraintsFilteredByOrigin.stream()
                     .filter(dep -> requiredGas.gas.contains(toGa(dep)))
-                    .filter(dep -> resolutionSet.contains(toGavtcs(dep)))
-                    .collect(Collectors.toList()));
+                    .forEach(dep -> {
+                        Gavtc gavtcs = toGavtcs(dep).toGavtc();
+                        if (resolutionSet.contains(gavtcs)) {
+                            requiredConstraints.add(dep);
+                            requiredGavtcs.add(gavtcs);
+                        }
+                    });
+
+            /* Expand - i.e. manage all transitives */
+            if (expand) {
+                requiredGas.gavtcs.stream()
+                        .filter(dep -> !requiredGavtcs.contains(dep))
+                        .forEach(dep -> requiredConstraints.add(toDependency(dep)));
+            }
 
             checkRequiredConstraints(requiredGas.gas, requiredConstraints);
             checkExclusions(requiredGas.expectedExclusions);
@@ -627,6 +663,22 @@ public class FlattenBomTask {
         project.setPomFile(result.toFile());
         return result;
 
+    }
+
+    static Dependency toDependency(Gavtc gavtc) {
+        Dependency dep = new Dependency();
+        dep.setGroupId(gavtc.getGroupId());
+        dep.setArtifactId(gavtc.getArtifactId());
+        dep.setVersion(gavtc.getVersion());
+        final String t = gavtc.getType();
+        if (t != null && !t.equals("jar")) {
+            dep.setType(t);
+        }
+        final String cl = gavtc.getClassifier();
+        if (cl != null) {
+            dep.setClassifier(cl);
+        }
+        return dep;
     }
 
     void addAdditionalBoms(List<Gav> additionalBoms, BiConsumer<Gav, Dependency> additionalBomEntryConsumer) {
@@ -715,7 +767,7 @@ public class FlattenBomTask {
 
         final GavSet collectorExcludes = GavSet.builder().include(parent.getGroupId() + ":" + parent.getArtifactId())
                 .build();
-        final Set<Gavtcs> allTransitives = new TreeSet<>();
+        final Set<Gavtc> allTransitives = new TreeSet<>();
 
         final ExpectedExclusions expectedExclusions = new ExpectedExclusions();
 
@@ -797,6 +849,7 @@ public class FlattenBomTask {
 
         ownManagedDependencies.stream()
                 .map(FlattenBomTask::toGavtcs)
+                .map(Gavtcs::toGavtc)
                 .forEach(allTransitives::add);
         return RequiredGas.of(Collections.unmodifiableSet(allTransitives),
                 unmodifiable(expectedExclusions.expectedExclusions));

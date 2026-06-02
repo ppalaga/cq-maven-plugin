@@ -1265,7 +1265,8 @@ public class ProdExcludesMojo extends AbstractMojo {
                     false,
                     product.getBannedDependencies(),
                     localRepositoryPath,
-                    childList(config, "additionalBoms").stream().map(Gav::of).collect(Collectors.toList()))
+                    childList(config, "additionalBoms").stream().map(Gav::of).collect(Collectors.toList()),
+                    true)
                     .execute();
             CqCommonUtils.installArtifact(flattenedBomPath, localRepositoryPath, p.getGroupId(), p.getArtifactId(), version,
                     "pom");

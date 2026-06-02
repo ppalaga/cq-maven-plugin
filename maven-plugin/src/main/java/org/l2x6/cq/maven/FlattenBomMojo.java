@@ -300,6 +300,15 @@ public class FlattenBomMojo extends AbstractMojo {
     boolean format;
 
     /**
+     * If {@code true} all transitive dependencies of artifacts selected by {@link #resolutionEntryPointIncludes} and
+     * {@link #resolutionEntryPointExcludes} will be managed.
+     *
+     * @since 2.25.0
+     */
+    @Parameter(property = "cq.flatten-bom.expand", defaultValue = "false")
+    boolean expand;
+
+    /**
      * A list of {@link BannedDependencyResource}s. Example:
      *
      * <pre>
@@ -411,7 +420,8 @@ public class FlattenBomMojo extends AbstractMojo {
                 bannedDeps.build(),
                 localRepositoryPath,
                 additionalBoms == null ? Collections.emptyList()
-                        : additionalBoms.stream().map(Gav::of).collect(Collectors.toList()))
+                        : additionalBoms.stream().map(Gav::of).collect(Collectors.toList()),
+                expand)
                 .execute();
 
     }
