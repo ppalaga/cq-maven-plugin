@@ -16,8 +16,6 @@
  */
 package org.l2x6.cq.common;
 
-import static java.util.stream.Collectors.joining;
-
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
@@ -51,9 +49,9 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-
 import javax.xml.XMLConstants;
 
+import org.apache.maven.artifact.versioning.ComparableVersion;
 import org.apache.maven.model.Dependency;
 import org.apache.maven.model.DependencyManagement;
 import org.apache.maven.model.Exclusion;
@@ -101,6 +99,8 @@ import org.l2x6.pom.tuner.model.GavtcsSet;
 import org.l2x6.pom.tuner.model.Module;
 import org.l2x6.pom.tuner.model.Profile;
 import org.l2x6.pom.tuner.transform.Siblings;
+
+import static java.util.stream.Collectors.joining;
 
 public class FlattenBomTask {
     public static class BomEntryTransformation {
@@ -185,7 +185,7 @@ public class FlattenBomTask {
     }
 
     static class DependencyCollector implements DependencyVisitor {
-        private final Set<Gavtc> allTransitives = new TreeSet<>();
+        private final Set<Gavtc> allTransitives = new TreeSet<>(Gavtc.groupFirstComparator());
         private final GavSet excludes;
         private final BiConsumer<Ga, Ga> exclusionConsumer;
         private final Deque<Ga> stack = new ArrayDeque<>();
@@ -380,9 +380,9 @@ public class FlattenBomTask {
         }
     }
 
-    private static record RequiredGas(Set<Gavtc> gavtcs, Set<Ga> gas, Map<Ga, Set<Ga>> expectedExclusions) {
-        public static RequiredGas of(Set<Gavtc> gavtcs, Map<Ga, Set<Ga>> expectedExclusions) {
-            return new RequiredGas(gavtcs, gavtcs.stream().map(Gavtc::toGa).collect(Collectors.toCollection(TreeSet::new)),
+    private static record RequiredGas(Set<Gavtcs> gavtcs, Set<Ga> gas, Map<Ga, Set<Ga>> expectedExclusions) {
+        public static RequiredGas of(Set<Gavtcs> gavtcs, Map<Ga, Set<Ga>> expectedExclusions) {
+            return new RequiredGas(gavtcs, gavtcs.stream().map(Gavtcs::toGa).collect(Collectors.toCollection(TreeSet::new)),
                     expectedExclusions);
         }
     }
@@ -594,12 +594,16 @@ public class FlattenBomTask {
                     .collect(Collectors.toList()));
 
             final List<Dependency> constraintsFilteredByOriginPlusAdditionalBoms = new ArrayList<>(constraintsFilteredByOrigin);
+            /* A map from dependency  managed in the given BOM to the BOM Gav containing the given dependency */
             final Map<Ga, Set<Gav>> additionalBomConstraits = new TreeMap<>();
+            final Map<Ga, BomEntryData> allAdditionalBomConstraits = new TreeMap<>();
             addAdditionalBoms(
                     additionalBoms,
                     (Gav gav, Dependency dep) -> {
+                        final Ga ga = new Ga(dep.getGroupId(), dep.getArtifactId());
+                        allAdditionalBomConstraits.compute(ga, (k, v) -> BomEntryData.of(v, dep));
                         constraintsFilteredByOriginPlusAdditionalBoms.add(dep);
-                        additionalBomConstraits.compute(new Ga(dep.getGroupId(), dep.getArtifactId()), (Ga k, Set<Gav> v) -> {
+                        additionalBomConstraits.compute(ga, (Ga k, Set<Gav> v) -> {
                             (v == null ? v = new TreeSet<Gav>() : v).add(gav);
                             return v;
                         });
@@ -630,6 +634,7 @@ public class FlattenBomTask {
             if (expand) {
                 requiredGas.gavtcs.stream()
                         .filter(dep -> !requiredGavtcs.contains(dep))
+                        .filter(dep -> !allAdditionalBomConstraits.contains(dep))
                         .forEach(dep -> requiredConstraints.add(toDependency(dep)));
             }
 
@@ -767,7 +772,7 @@ public class FlattenBomTask {
 
         final GavSet collectorExcludes = GavSet.builder().include(parent.getGroupId() + ":" + parent.getArtifactId())
                 .build();
-        final Set<Gavtc> allTransitives = new TreeSet<>();
+        final Set<Gavtcs> allTransitives = new TreeSet<>(Gavtc.groupFirstComparator());
 
         final ExpectedExclusions expectedExclusions = new ExpectedExclusions();
 
@@ -851,6 +856,8 @@ public class FlattenBomTask {
                 .map(FlattenBomTask::toGavtcs)
                 .map(Gavtcs::toGavtc)
                 .forEach(allTransitives::add);
+        log.warn("All transitives:");
+        allTransitives.forEach(dep -> log.warn(" - " + dep));
         return RequiredGas.of(Collections.unmodifiableSet(allTransitives),
                 unmodifiable(expectedExclusions.expectedExclusions));
     }
@@ -1369,5 +1376,35 @@ public class FlattenBomTask {
                 throw new RuntimeException("Could not write " + flattenedPomPath, e);
             }
         }
+    }
+
+    static record BomEntryData(Ga ga, Set<ComparableVersion> versions, Set<TypeClassifier> typeClassifiers, Set<Ga> exclusions) {
+        static BomEntryData of(BomEntryData existing, Dependency dep) {
+            if (existing != null) {
+                existing.versions.add(new ComparableVersion(dep.getVersion()));
+                existing.typeClassifiers.add(new TypeClassifier(dep.getType(), dep.getClassifier()));
+                List<Exclusion> excl = dep.getExclusions();
+                if (excl != null && !excl.isEmpty()) {
+                    excl.stream().map(e -> new Ga(e.getGroupId(), e.getArtifactId())).forEach(existing.exclusions::add);
+                }
+                return existing;
+            } else {
+                Set<ComparableVersion> versions = new TreeSet<>();
+                versions.add(new ComparableVersion(dep.getVersion()));
+
+                Set<TypeClassifier> typeClassifiers = new LinkedHashSet<>();
+                typeClassifiers.add(new TypeClassifier(dep.getType(), dep.getClassifier()));
+
+                Set<Ga> exclusions = new TreeSet<>();
+                List<Exclusion> excl = dep.getExclusions();
+                if (excl != null && !excl.isEmpty()) {
+                    excl.stream().map(e -> new Ga(e.getGroupId(), e.getArtifactId())).forEach(exclusions::add);
+                }
+
+                return new BomEntryData(new Ga(dep.getGroupId(), dep.getArtifactId()), versions, typeClassifiers, exclusions);
+            }
+        }
+    }
+    static record TypeClassifier(String type, String classifier) {
     }
 }
