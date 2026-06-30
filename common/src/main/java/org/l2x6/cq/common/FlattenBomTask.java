@@ -517,7 +517,7 @@ public class FlattenBomTask {
         this.reducedPomPath = resolve(this.basePath, reducedPomPath, FlattenBomTask.DEFAULT_FLATTENED_REDUCED_POM_FILE);
         this.reducedExpandedPomPath = reducedExpandedPomPath != null
                 ? resolve(this.basePath, reducedExpandedPomPath, FlattenBomTask.DEFAULT_FLATTENED_REDUCED_EXPANDED_POM_FILE)
-                        : null;
+                : null;
         this.charset = charset;
         this.log = log;
         this.repositories = repositories;
@@ -652,7 +652,7 @@ public class FlattenBomTask {
                     .forEach(dep -> {
                         final Gavtcs gavtcs = toGavtcs(dep);
                         final Gavtc gavtc = gavtcs.toGavtc();
-                        if (resolutionSet.contains(gavtc)) {
+                        if (resolutionSet.contains(gavtcs)) {
                             requiredConstraints.compute(gavtc.toGa(), (k, v) -> BomEntryData.of(v, gavtcs));
                             requiredGavtcs.add(gavtc);
                         }
@@ -662,7 +662,6 @@ public class FlattenBomTask {
                     requiredConstraints.values().stream()
                             .flatMap(BomEntryData::toGavtcs)
                             .collect(Collectors.toCollection(() -> new TreeSet<Gavtcs>(Gavtcs.groupFirstComparator()))));
-
 
             checkRequiredConstraints(requiredGas.gas, flatRequiredConstraints);
             checkExclusions(requiredGas.expectedExclusions);
